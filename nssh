@@ -1,0 +1,29 @@
+#!/bin/sh
+# Light jail to hide some implementation magic from the user
+# By dominic@sensepost.com
+# All rights reserved. 2018
+ns="USER"
+mnt="/mnt/user/"
+script_num=$(grep -n '^# START' $0 |cut -d: -f1)
+# Get the PID of our primary shell
+PID=$(pgrep unshare|head -n1)
+# Check if our primary shell is running, if not run it
+if [ $(( $PID + 1 )) -eq 1 ]; then
+  # Create a new primary shell in it's own process & mount namespace
+  # with it's own /proc. Unfortunately we can't mount sys from outside
+  # so we need to do the complex tail stuff to run the inner script
+  exec unshare --pid --net=/var/run/netns/$ns --mount-proc=$mnt/proc --fork chroot $mnt sh -c "`tail -n +$script_num $0`"
+else
+  # There's already a primary shell, associate to that one
+  bashpid=$(pstree -p $PID|sed "s/^.*bash(\([0-9]*\)).*$/\1/"|head -n1)
+  nsenter -t $bashpid --net --mount --pid chroot $mnt sh -c "`tail -n +$(($script_num+5)) $0`"
+fi
+exit $?
+
+# START OF INNER SCRIPT 
+ns="USER"
+mount -t sysfs sysfs /sys
+mount -o bind /etc/netns/$ns /run/resolvconf
+ip link set lo up
+cd
+exec /bin/bash
